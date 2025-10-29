@@ -5,7 +5,7 @@ import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
 import http from "http";
-import WebSocket, { WebSocketServer } from "ws";
+import { WebSocketServer } from "ws"; // ✅ fixed import
 
 const PORT = process.env.PORT || 8080;
 
@@ -17,9 +17,8 @@ app.get("/", (req, res) => {
   res.send("✅ WebSocket server is running on Render.");
 });
 
-
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocketServer({ server }); // ✅ fixed
 
 const clients = new Map();
 const espBySsid = new Map();
