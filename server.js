@@ -16,28 +16,42 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
+// ================== HEALTH CHECK (Render requirement) ==================
+app.get("/", (req, res) => {
+  res.send("✅ WebSocket server is running on Render.");
+});
+
 // ================== SERVER & WS ==================
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-const clients = new Map();
-const espBySsid = new Map();
-const frontendByUserId = new Map();
+// ================== STATE MAPS ==================
+const clients = new Map();        // Tracks connected clients (web + esp)
+const espBySsid = new Map();      // Tracks ESP32 by SSID
+const frontendByUserId = new Map(); // Tracks frontends by user ID
 
 // ================== WEBSOCKET HANDLERS ==================
-wss.on("connection", ws => {
+wss.on("connection", (ws) => {
   console.log("🔗 New WebSocket client connected");
 
   ws.isAlive = true;
   ws.clientType = "unknown";
 
-  ws.on("pong", () => { ws.isAlive = true; });
+  // --- Heartbeat pong ---
+  ws.on("pong", () => {
+    ws.isAlive = true;
+  });
 
-  ws.on("message", message => {
+  // --- Handle messages ---
+  ws.on("message", (message) => {
     let data;
-    try { data = JSON.parse(message); } catch { return; }
+    try {
+      data = JSON.parse(message);
+    } catch {
+      return;
+    }
 
-    // --- RECONNECT / NEW ESP32 ---
+    // --- Handle reconnect / new ESP32 ---
     if (data.type === "reconnect") {
       const oldInfo = espBySsid.get(data.ssid);
       if (!oldInfo) console.log(`🆕 New ESP32 connected: ${data.ssid}`);
@@ -50,6 +64,7 @@ wss.on("connection", ws => {
         last: Date.now(),
       });
 
+      // Remove duplicates
       clients.forEach((info, client) => {
         if (info.ssid === data.ssid && client !== ws) {
           clients.delete(client);
@@ -61,17 +76,19 @@ wss.on("connection", ws => {
 
       const espInfo = espBySsid.get(data.ssid);
       if (espInfo?.ws?.readyState === WebSocket.OPEN) {
-        espInfo.ws.send(JSON.stringify({
-          type: "connection",
-          action: "sayHello",
-          ssid: data.ssid,
-          userID: espInfo.userID,
-        }));
+        espInfo.ws.send(
+          JSON.stringify({
+            type: "connection",
+            action: "sayHello",
+            ssid: data.ssid,
+            userID: espInfo.userID,
+          })
+        );
         console.log(`📤 Sent command to ESP32 (${data.ssid})`);
       }
     }
 
-    // --- HEARTBEAT ---
+    // --- Heartbeat ---
     if (data.type === "heartbeat") {
       ws.clientType = "esp";
       clients.set(ws, { last: Date.now(), ssid: data.ssid });
@@ -91,26 +108,45 @@ wss.on("connection", ws => {
         msg: "ESP32 heartbeat received",
       });
 
-      wss.clients.forEach(client => {
-        if (client !== ws && client.readyState === WebSocket.OPEN) client.send(msg);
+      wss.clients.forEach((client) => {
+        if (client !== ws && client.readyState === WebSocket.OPEN)
+          client.send(msg);
       });
       return;
     }
 
-    // --- NFC EVENT ---
+    // --- NFC Event ---
     if (data.type === "nfc") {
-      const msg = JSON.stringify({ type: "nfcEvent", uid: data.uid, message: "NFC tag detected" });
+      console.log(`📡 NFC tag detected from user ${data.userID}`);
+      const msg = JSON.stringify({
+        type: "nfcEvent",
+        uid: data.uid,
+        message: "NFC tag detected",
+      });
       const frontend = frontendByUserId.get(data.userID);
       if (frontend?.ws?.readyState === WebSocket.OPEN) frontend.ws.send(msg);
     }
+
+    // --- Frontend user registering (for targeted push) ---
+    if (data.type === "accStatus") {
+      frontendByUserId.set(data.userID, { ws });
+      ws.clientType = "frontend";
+      console.log(`💻 Frontend registered for user ${data.userID}`);
+    }
   });
 
+  // --- Handle disconnect ---
   ws.on("close", () => {
     console.log("🔌 WebSocket client disconnected");
     const info = clients.get(ws);
     if (info?.ssid) {
       const espInfo = espBySsid.get(info.ssid);
-      if (espInfo) espBySsid.set(info.ssid, { ws: null, status: "offline", userID: espInfo.userID || "" });
+      if (espInfo)
+        espBySsid.set(info.ssid, {
+          ws: null,
+          status: "offline",
+          userID: espInfo.userID || "",
+        });
     }
     clients.delete(ws);
   });
@@ -130,7 +166,7 @@ setInterval(() => {
         msg: "ESP32 not responding",
       });
 
-      wss.clients.forEach(client => {
+      wss.clients.forEach((client) => {
         if (client.readyState === WebSocket.OPEN) client.send(offlineMsg);
       });
 
@@ -138,12 +174,17 @@ setInterval(() => {
       clients.delete(ws);
 
       const espInfo = espBySsid.get(data.ssid);
-      if (espInfo) espBySsid.set(data.ssid, { ws: null, status: "offline", userID: espInfo.userID || "" });
+      if (espInfo)
+        espBySsid.set(data.ssid, {
+          ws: null,
+          status: "offline",
+          userID: espInfo.userID || "",
+        });
     }
   });
 }, 5000);
 
 // ================== START SERVER ==================
 server.listen(PORT, () => {
-  console.log(`🚀 ESP32 WebSocket server running on http://localhost:${PORT}`);
+  console.log(`🚀 ESP32 WebSocket server running on port ${PORT}`);
 });
