@@ -256,6 +256,7 @@ wss.on("connection", (ws) => {
         console.log(`SSID ${device.ssid} belongs to user ${data.userID} and is ${device.stats}`);
         const msg = JSON.stringify({
           type: "deviceConnection",
+          userID: data.userID,
           deviceName: device.ssid,
           message: device.stats === "online" ? "Connected" : "Not connected",
         });
@@ -287,6 +288,24 @@ wss.on("connection", (ws) => {
           console.log(`⚠️ No active frontend socket for user ${data.userID}`);
         }
       }
+
+      const allDevices = Array.from(espBySsid.entries()).map(([ssid, info]) => ({
+        deviceName: ssid,
+        userID: info.userID,
+        status: info.stats,
+        last: info.last
+      }));
+
+      const msg = JSON.stringify({
+        type: "deviceList",
+        data: allDevices
+      });
+
+      frontendByUserId.forEach((frontend) => {
+        if (frontend.ws && frontend.ws.readyState === 1) {
+          frontend.ws.send(msg);
+        }
+      });
     }
 
     if(data.type === "nfc"){
