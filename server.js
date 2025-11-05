@@ -49,58 +49,71 @@ wss.on("connection", (ws) => {
         console.log(`♻️ ESP32 reconnected with SSID: ${data.ssid}`);
       }
 
-      // Always replace with the new WebSocket
+      // Save or update ESP info
       espBySsid.set(data.ssid, {
         ws,
         userID: oldInfo?.userID || data.userID || "",
         stats: "online",
         last: Date.now(),
+        batteryVoltage: data.batteryVoltage ?? null,
+        batteryPercentage: data.batteryPercentage ?? null,
       });
 
-      // Also replace inside clients map (remove old ws)
+      // Replace old WebSocket reference if necessary
       clients.forEach((info, client) => {
         if (info.ssid === data.ssid && client !== ws) {
-          clients.delete(client); // remove old reference
+          clients.delete(client);
           client.terminate();
         }
       });
 
       clients.set(ws, { last: Date.now(), ssid: data.ssid });
 
-      // Send confirmation
+      // Send confirmation back to ESP
       const espInfo = espBySsid.get(data.ssid);
       if (espInfo && espInfo.ws.readyState === WebSocket.OPEN) {
         const message = JSON.stringify({
           type: "connection",
           action: "sayHello",
           ssids: data.ssid,
-          userID: espInfo.userID
+          userID: espInfo.userID,
         });
         espInfo.ws.send(message);
         console.log(`📤 Sent command to ESP32 (${data.ssid})`);
       }
     }
 
-    if (data.type === "heartbeat"){
+    if (data.type === "heartbeat") {
       ws.clientType = "esp";
-
       clients.set(ws, { last: Date.now(), ssid: data.ssid });
 
+      // Extract battery info
+      const batteryVoltage = data.batteryVoltage ?? null;
+      const batteryPercentage = data.batteryPercentage ?? null;
+
+      // Update esp info
       const oldInfo = espBySsid.get(data.ssid);
       espBySsid.set(data.ssid, {
         ws,
-        userID: oldInfo?.userID || null, // save userID if you know it
+        userID: oldInfo?.userID || data.userID || null,
         stats: "online",
         last: Date.now(),
+        batteryVoltage,
+        batteryPercentage,
       });
 
-      console.log(`✅ ESP32 heartbeat received (SSID: ${data.ssid})`);
+      console.log(
+        `✅ ESP32 heartbeat received (SSID: ${data.ssid}) | 🔋 ${batteryPercentage}% (${batteryVoltage}V)`
+      );
 
+      // Send to all frontend clients
       const onlineMsg = JSON.stringify({
         type: "status",
         status: "online",
         ssid: data.ssid,
         msg: "ESP32 heartbeat received",
+        batteryVoltage,
+        batteryPercentage,
       });
 
       wss.clients.forEach((client) => {
