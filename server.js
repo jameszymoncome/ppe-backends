@@ -121,11 +121,24 @@ wss.on("connection", (ws) => {
         last: Date.now()
       });
 
-      if (!oldInfo) {
-        console.log(`✅ New user added: ${data.userID}`);
-      } else {
-        console.log(`♻️ User reconnected: ${data.userID}`);
-      }
+      const messageType = oldInfo ? "reconnect" : "newConnection";
+      const logMessage = oldInfo ? `♻️ User reconnected: ${data.userID}` : `✅ New user added: ${data.userID}`;
+      console.log(logMessage);
+
+      const msg = JSON.stringify({
+        type: "frontendStatus",
+        userID: data.userID,
+        status: "online",
+        event: messageType,
+        timestamp: new Date().toISOString()
+      });
+
+      frontendByUserId.forEach((frontend) => {
+        if (frontend.ws && frontend.ws.readyState === 1) {
+          frontend.ws.send(msg);
+        }
+      });
+
     }
 
     if (data.type === "logout" && data.userID) {
